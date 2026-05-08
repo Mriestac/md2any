@@ -25,19 +25,39 @@ ConversionResult failedResult(const QString &message)
 
 } // namespace
 
-PandocRunner::PandocRunner(QString pandocPath)
+PandocRunner::PandocRunner(QString pandocPath, QStringList inputFormats, QStringList outputFormats)
     : m_pandocPath(std::move(pandocPath))
+    , m_inputFormats(std::move(inputFormats))
+    , m_outputFormats(std::move(outputFormats))
 {
     m_pandocPath = m_pandocPath.trimmed();
 
     if (m_pandocPath.isEmpty()) {
         m_pandocPath = QString::fromLatin1(DefaultPandocPath);
     }
+
+    if (m_inputFormats.isEmpty()) {
+        m_inputFormats = supportedInputFormats();
+    }
+
+    if (m_outputFormats.isEmpty()) {
+        m_outputFormats = supportedOutputFormats();
+    }
 }
 
 QString PandocRunner::pandocPath() const
 {
     return m_pandocPath;
+}
+
+QStringList PandocRunner::inputFormats() const
+{
+    return m_inputFormats;
+}
+
+QStringList PandocRunner::outputFormats() const
+{
+    return m_outputFormats;
 }
 
 ConversionResult PandocRunner::checkPandocAvailable() const
@@ -93,9 +113,14 @@ ConversionResult PandocRunner::validate(const ConversionTask &task) const
         return failedResult(QStringLiteral("Output file is required."));
     }
 
+    const auto inputFormat = normalizedInputFormat(task.inputFormat);
     const auto format = normalizedOutputFormat(task.outputFormat);
 
-    if (!isSupportedOutputFormat(format)) {
+    if (!m_inputFormats.contains(inputFormat)) {
+        return failedResult(QStringLiteral("Unsupported input format."));
+    }
+
+    if (!m_outputFormats.contains(format)) {
         return failedResult(QStringLiteral("Unsupported output format."));
     }
 
@@ -193,6 +218,8 @@ QStringList PandocRunner::buildArguments(const ConversionTask &task) const
         }
         args << QStringLiteral("--mathjax");
     }
+    args << QStringLiteral("-f");
+    args << normalizedInputFormat(task.inputFormat);
     args << QStringLiteral("-t");
     args << normalizedOutputFormat(task.outputFormat);
     args << task.inputPath;
@@ -207,6 +234,12 @@ QStringList PandocRunner::buildCommand(const ConversionTask &task) const
     command << m_pandocPath;
     command << buildArguments(task);
     return command;
+}
+
+QString normalizedInputFormat(const QString &format)
+{
+    const auto normalized = format.trimmed().toLower();
+    return normalized.isEmpty() ? QString::fromLatin1(DefaultInputFormat) : normalized;
 }
 
 QString normalizedOutputFormat(const QString &format)

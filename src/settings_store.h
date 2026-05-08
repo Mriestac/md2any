@@ -9,6 +9,7 @@ struct AppSettings
     QString pandocPath;
     QString lastInputDir;
     QString lastOutputDir;
+    QString lastInputFormat;
     QString lastOutputFormat;
 };
 

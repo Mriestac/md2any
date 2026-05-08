@@ -124,7 +124,31 @@
 - 验收方式：转换成功后可打开目录
 - 风险点：打开系统程序可能受系统策略限制
 
-### T6.2 转换历史
+### T6.2 Pandoc 路径设置和打开输出文件
+
+- 任务目标：提升打包版可用性，允许用户在 UI 中配置 Pandoc 路径，并在转换成功后打开输出文件
+- 涉及文件：`src/app_controller.h`、`src/app_controller.cpp`、`src/qml/Main.qml`、`tests/test_app_controller.cpp`
+- 实现步骤：暴露 `pandocPath` 属性，增加检测和保存方法，QML 增加路径输入/选择/检测/保存按钮，转换成功后启用打开输出文件
+- 验收方式：构建通过，`ctest` 通过，打包版可启动，Pandoc 路径可保存和重新读取
+- 风险点：只保存用户指定路径，不修改系统 PATH，不把 Pandoc 复制进发布包
+
+### T6.3 多格式互转能力发现
+
+- 任务目标：为最终支持 Pandoc 所有格式互转打基础
+- 涉及文件：`src/pandoc_formats.h`、`src/pandoc_formats.cpp`、`tests/test_pandoc_formats.cpp`
+- 实现步骤：调用或解析 Pandoc 支持的输入/输出格式列表，设计格式能力模型，区分输入格式和输出格式
+- 验收方式：可通过 fake Pandoc 测试格式发现；真实 Pandoc 可列出输入/输出格式
+- 风险点：不同 Pandoc 版本支持格式可能不同，不能硬编码为唯一事实来源
+
+### T6.4 动态输入格式和输出格式选择
+
+- 任务目标：从 Markdown 固定输入扩展为 Pandoc 支持格式互转
+- 涉及文件：`src/conversion_task.h`、`src/pandoc_runner.h`、`src/pandoc_runner.cpp`、`src/app_controller.h`、`src/app_controller.cpp`、`src/qml/Main.qml`
+- 实现步骤：增加输入格式字段，UI 使用动态格式列表，命令构建增加 `-f` 参数，保留 Markdown 默认体验
+- 验收方式：命令预览包含 `-f` 和 `-t`，默认 Markdown 到 HTML 流程不退化
+- 风险点：不是所有格式组合都一定可用，失败时需要展示 Pandoc stderr
+
+### T6.5 转换历史
 
 - 任务目标：记录最近转换任务
 - 涉及文件：待定

@@ -7,9 +7,9 @@ ApplicationWindow {
     id: root
 
     width: 920
-    height: 640
+    height: 700
     minimumWidth: 780
-    minimumHeight: 540
+    minimumHeight: 620
     visible: true
     title: "md2any"
     color: "#f6f7f9"
@@ -43,18 +43,31 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
-        var index = outputFormatBox.model.indexOf(appController.defaultOutputFormat)
-        if (index >= 0) {
-            outputFormatBox.currentIndex = index
-        }
+        syncFormatSelections()
+    }
+
+    function syncFormatSelections() {
+        var inputIndex = appController.inputFormats.indexOf(appController.defaultInputFormat)
+        inputFormatBox.currentIndex = inputIndex >= 0 ? inputIndex : 0
+
+        var outputIndex = appController.outputFormats.indexOf(appController.defaultOutputFormat)
+        outputFormatBox.currentIndex = outputIndex >= 0 ? outputIndex : 0
+    }
+
+    Connections {
+        target: appController
+        function onInputFormatsChanged() { root.syncFormatSelections() }
+        function onOutputFormatsChanged() { root.syncFormatSelections() }
+        function onDefaultInputFormatChanged() { root.syncFormatSelections() }
+        function onDefaultOutputFormatChanged() { root.syncFormatSelections() }
     }
 
     FileDialog {
         id: inputDialog
-        title: "选择 Markdown 文件"
+        title: "选择输入文件"
         fileMode: FileDialog.OpenFile
         currentFolder: root.folderUrl(appController.lastInputDir)
-        nameFilters: ["Markdown 文件 (*.md *.markdown)", "所有文件 (*)"]
+        nameFilters: ["所有支持的输入文件 (*)", "所有文件 (*)"]
         onAccepted: {
             inputPathField.text = root.pathFromUrl(selectedFile)
             if (outputPathField.text.length === 0) {
@@ -74,6 +87,14 @@ ApplicationWindow {
                 root.pathFromUrl(selectedFile),
                 outputFormatBox.currentText)
         }
+    }
+
+    FileDialog {
+        id: pandocDialog
+        title: "选择 Pandoc 程序"
+        fileMode: FileDialog.OpenFile
+        nameFilters: ["可执行程序 (*.exe)", "所有文件 (*)"]
+        onAccepted: pandocPathField.text = root.pathFromUrl(selectedFile)
     }
 
     ColumnLayout {
@@ -131,7 +152,7 @@ ApplicationWindow {
             TextField {
                 id: inputPathField
                 Layout.fillWidth: true
-                placeholderText: "选择或输入 .md 文件路径"
+                placeholderText: "选择或输入待转换文件路径"
                 selectByMouse: true
                 enabled: !appController.busy
             }
@@ -166,21 +187,33 @@ ApplicationWindow {
             }
 
             Label {
-                text: "输出格式"
+                text: "输入/输出格式"
                 color: "#30363d"
                 Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
             }
 
-            ComboBox {
-                id: outputFormatBox
-                model: ["html", "docx", "pdf"]
-                Layout.preferredWidth: 160
-                enabled: !appController.busy
-                onCurrentTextChanged: {
-                    if (outputPathField.text.length > 0) {
-                        outputPathField.text = appController.normalizedOutputPath(outputPathField.text, currentText)
-                    } else if (inputPathField.text.length > 0) {
-                        outputPathField.text = root.outputPathFor(inputPathField.text, currentText)
+            RowLayout {
+                Layout.fillWidth: true
+                spacing: 8
+
+                ComboBox {
+                    id: inputFormatBox
+                    model: appController.inputFormats
+                    Layout.preferredWidth: 180
+                    enabled: !appController.busy
+                }
+
+                ComboBox {
+                    id: outputFormatBox
+                    model: appController.outputFormats
+                    Layout.preferredWidth: 180
+                    enabled: !appController.busy
+                    onCurrentTextChanged: {
+                        if (outputPathField.text.length > 0) {
+                            outputPathField.text = appController.normalizedOutputPath(outputPathField.text, currentText)
+                        } else if (inputPathField.text.length > 0) {
+                            outputPathField.text = root.outputPathFor(inputPathField.text, currentText)
+                        }
                     }
                 }
             }
@@ -190,6 +223,52 @@ ApplicationWindow {
                 text: "允许覆盖"
                 enabled: !appController.busy
             }
+
+            Label {
+                text: "Pandoc 路径"
+                color: "#30363d"
+                Layout.alignment: Qt.AlignRight | Qt.AlignVCenter
+            }
+
+            TextField {
+                id: pandocPathField
+                Layout.fillWidth: true
+                text: appController.pandocPath
+                placeholderText: "默认使用 PATH 中的 pandoc"
+                selectByMouse: true
+                enabled: !appController.busy
+                onEditingFinished: appController.pandocPath = text
+            }
+
+            RowLayout {
+                spacing: 8
+
+                Button {
+                    text: "选择"
+                    enabled: !appController.busy
+                    onClicked: pandocDialog.open()
+                }
+
+                Button {
+                    text: "检测"
+                    enabled: !appController.busy
+                    onClicked: appController.checkPandocPath(pandocPathField.text)
+                }
+
+                Button {
+                    text: "保存"
+                    enabled: !appController.busy
+                    onClicked: appController.savePandocPath(pandocPathField.text)
+                }
+            }
+        }
+
+        Label {
+            Layout.fillWidth: true
+            text: appController.formatStatusMessage + " 输入格式对应 Pandoc -f，输出格式对应 Pandoc -t。"
+            color: "#69707a"
+            font.pixelSize: 12
+            elide: Text.ElideRight
         }
 
         RowLayout {
@@ -202,6 +281,7 @@ ApplicationWindow {
                 onClicked: appController.validateConversion(
                     inputPathField.text,
                     outputPathField.text,
+                    inputFormatBox.currentText,
                     outputFormatBox.currentText,
                     overwriteBox.checked)
             }
@@ -213,6 +293,7 @@ ApplicationWindow {
                 onClicked: appController.startConversion(
                     inputPathField.text,
                     outputPathField.text,
+                    inputFormatBox.currentText,
                     outputFormatBox.currentText,
                     overwriteBox.checked)
             }
@@ -227,6 +308,12 @@ ApplicationWindow {
                 text: "打开输出目录"
                 enabled: !appController.busy
                 onClicked: appController.openOutputDirectory()
+            }
+
+            Button {
+                text: "打开输出文件"
+                enabled: !appController.busy && appController.hasOutputFile
+                onClicked: appController.openOutputFile()
             }
 
             Label {

@@ -2,23 +2,24 @@
 
 ## 项目目标
 
-md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。用户通过 QML 图形界面选择输入文件、输出格式和输出路径，软件在后台调用本机 Pandoc 完成转换。
+md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。用户通过 QML 图形界面选择输入文件、输出格式和输出路径，软件在后台调用本机 Pandoc 完成转换。最终目标是逐步覆盖 Pandoc 支持的输入和输出格式互相转换。
 
-第一版目标是先交付一个稳定可运行、可测试、可打包的 MVP，而不是一次性实现复杂编辑器或批量任务系统。
+第一版目标是先交付一个稳定可运行、可测试、可打包的文档转换 MVP，并逐步从 Markdown 转 HTML/DOCX/PDF 扩展到 Pandoc 支持的输入/输出格式互转，而不是一次性实现复杂编辑器或批量任务系统。
 
 ## 目标用户
 
 - 经常使用 Markdown 写文档，但不想记忆 Pandoc 命令行参数的用户
 - 需要把 Markdown 转换为 HTML、DOCX、PDF 的写作者、学生、技术文档维护者
+- 需要把 Pandoc 支持的多种文档格式互相转换，但希望通过图形界面完成配置的用户
 - 需要一个简单桌面工具来包装 Pandoc 的 Windows 用户
 
 ## 核心使用流程
 
 1. 用户启动 md2any。
 2. 软件检测本机 Pandoc 是否可用。
-3. 用户选择一个 Markdown 输入文件。
+3. 用户选择一个输入文件。
 4. 软件根据输入文件和输出格式生成默认输出路径。
-5. 用户选择输出格式和输出路径。
+5. 用户选择输入格式、输出格式和输出路径。
 6. 用户点击开始转换。
 7. 软件校验输入、输出和 Pandoc 环境。
 8. 后端调用 Pandoc 执行转换。
@@ -29,21 +30,23 @@ md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。�
 
 ### 文件选择
 
-- 选择单个 Markdown 输入文件
+- 选择单个输入文件
 - 手动输入输入文件路径
 - 选择输出文件路径
 - 根据输出格式自动推断默认扩展名
 
 ### 转换配置
 
-- 输出格式支持 `html`、`docx`、`pdf`
-- 输入格式 MVP 默认按 Markdown 处理
+- 输入格式默认 `markdown`，可从当前 Pandoc 支持的可读格式中选择
+- 输出格式从当前 Pandoc 支持的可写格式中选择
 - 支持是否覆盖已存在输出文件
 
 ### Pandoc 调用
 
 - 启动时检测 Pandoc 是否可用
 - 支持默认从系统 `PATH` 查找 Pandoc
+- 支持在 UI 中设置、检测并保存 Pandoc 可执行文件路径
+- 支持读取 Pandoc 当前版本提供的输入/输出格式列表
 - 使用后端模块集中构建 Pandoc 命令
 - 执行真实转换并捕获标准输出、标准错误和退出码
 
@@ -87,6 +90,8 @@ md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。�
 - 元数据编辑
 - PDF 引擎选择
 - 打开输出文件或输出目录
+- 动态列出 Pandoc 支持的输入格式和输出格式
+- 支持 Pandoc 多格式互转
 - 拖拽文件导入
 - 多语言界面
 - 主题切换
@@ -116,6 +121,7 @@ md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。�
 - C++ 应用入口
 - QML 后端桥接模块
 - Pandoc 执行模块
+- Pandoc 格式发现模块
 - 转换任务数据模型
 - 配置读写模块
 - 测试模块
@@ -132,6 +138,7 @@ md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。�
 | output_format | string | 输出格式，支持 html、docx、pdf |
 | overwrite | boolean | 是否允许覆盖已存在输出文件 |
 | extra_args | string[] | 额外 Pandoc 参数，MVP 默认为空 |
+| input_format | string | 输入格式，默认 markdown，来自 Pandoc 支持的可读格式 |
 | status | string | idle、running、success、failed |
 | message | string | 当前状态说明或错误信息 |
 
@@ -154,6 +161,7 @@ md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。�
 | pandoc_path | string | Pandoc 可执行文件路径，默认使用 pandoc |
 | last_input_dir | string | 上次输入目录 |
 | last_output_dir | string | 上次输出目录 |
+| last_input_format | string | 上次输入格式 |
 | last_output_format | string | 上次输出格式 |
 
 ## 验收标准
@@ -163,6 +171,8 @@ md2any 是一个基于 Pandoc 的 Windows 桌面可视化文档转换工具。�
 - 可以选择一个 Markdown 文件
 - 可以选择 `html`、`docx`、`pdf` 输出格式
 - 可以设置输出路径
+- 可以设置并保存 Pandoc 路径
+- 可以转换成功后打开输出文件或输出目录
 - 点击转换后真实调用 Pandoc
 - 转换成功后生成目标文件
 - Pandoc 不存在时有明确错误提示

@@ -21,6 +21,7 @@ private slots:
         const auto settings = store.load();
 
         QCOMPARE(settings.pandocPath, QStringLiteral("pandoc"));
+        QCOMPARE(settings.lastInputFormat, QStringLiteral("markdown"));
         QCOMPARE(settings.lastOutputFormat, QStringLiteral("html"));
         QVERIFY(settings.lastInputDir.isEmpty());
         QVERIFY(settings.lastOutputDir.isEmpty());
@@ -40,6 +41,7 @@ private slots:
             QStringLiteral("C:/Tools/Pandoc/pandoc.exe"),
             inputDir,
             outputDir,
+            QStringLiteral("HTML"),
             QStringLiteral("DOCX"),
         });
 
@@ -48,6 +50,7 @@ private slots:
         QCOMPARE(settings.pandocPath, QStringLiteral("C:/Tools/Pandoc/pandoc.exe"));
         QCOMPARE(settings.lastInputDir, inputDir);
         QCOMPARE(settings.lastOutputDir, outputDir);
+        QCOMPARE(settings.lastInputFormat, QStringLiteral("html"));
         QCOMPARE(settings.lastOutputFormat, QStringLiteral("docx"));
     }
 
@@ -61,16 +64,18 @@ private slots:
             QStringLiteral("  "),
             {},
             {},
+            QStringLiteral("  "),
             QStringLiteral("epub"),
         });
 
         const auto settings = store.load();
 
         QCOMPARE(settings.pandocPath, QStringLiteral("pandoc"));
-        QCOMPARE(settings.lastOutputFormat, QStringLiteral("html"));
+        QCOMPARE(settings.lastInputFormat, QStringLiteral("markdown"));
+        QCOMPARE(settings.lastOutputFormat, QStringLiteral("epub"));
     }
 
-    void invalidSavedFormatLoadsAsDefault()
+    void emptySavedFormatLoadsAsDefault()
     {
         QTemporaryDir tempDir;
         QVERIFY(tempDir.isValid());
@@ -78,12 +83,14 @@ private slots:
         const auto settingsPath = tempDir.filePath(QStringLiteral("settings.ini"));
         QSettings rawSettings(settingsPath, QSettings::IniFormat);
         rawSettings.setValue(QStringLiteral("pandocPath"), QStringLiteral("pandoc"));
-        rawSettings.setValue(QStringLiteral("lastOutputFormat"), QStringLiteral("epub"));
+        rawSettings.setValue(QStringLiteral("lastInputFormat"), QStringLiteral(" "));
+        rawSettings.setValue(QStringLiteral("lastOutputFormat"), QStringLiteral(" "));
         rawSettings.sync();
 
         const SettingsStore store(settingsPath);
         const auto settings = store.load();
 
+        QCOMPARE(settings.lastInputFormat, QStringLiteral("markdown"));
         QCOMPARE(settings.lastOutputFormat, QStringLiteral("html"));
     }
 };

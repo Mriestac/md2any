@@ -1,5 +1,7 @@
 #include "app_controller.h"
 
+#include "pandoc_formats.h"
+
 #include <QDesktopServices>
 #include <QDir>
 #include <QFileInfo>
@@ -11,9 +13,40 @@ namespace {
 QString normalizeFormat(const QString &format)
 {
     const auto normalized = Md2Any::normalizedOutputFormat(format);
-    return Md2Any::isSupportedOutputFormat(normalized)
-        ? normalized
-        : QString::fromLatin1(Md2Any::DefaultOutputFormat);
+    return normalized.isEmpty()
+        ? QString::fromLatin1(Md2Any::DefaultOutputFormat)
+        : normalized;
+}
+
+QString normalizeInputFormat(const QString &format)
+{
+    const auto normalized = Md2Any::normalizedInputFormat(format);
+    return normalized.isEmpty()
+        ? QString::fromLatin1(Md2Any::DefaultInputFormat)
+        : normalized;
+}
+
+QStringList inputFormatPriority()
+{
+    return {
+        QStringLiteral("markdown"),
+        QStringLiteral("html"),
+        QStringLiteral("docx"),
+        QStringLiteral("latex"),
+        QStringLiteral("typst"),
+    };
+}
+
+QStringList outputFormatPriority()
+{
+    return {
+        QStringLiteral("html"),
+        QStringLiteral("docx"),
+        QStringLiteral("pdf"),
+        QStringLiteral("latex"),
+        QStringLiteral("typst"),
+        QStringLiteral("epub"),
+    };
 }
 
 QString quotedForPreview(const QString &value)
@@ -33,8 +66,7 @@ AppController::AppController(QObject *parent)
     : QObject(parent)
 {
     initializeFromSettings();
-    connect(&m_process, &QProcess::finished, this, &AppController::finishProcess);
-    connect(&m_process, &QProcess::errorOccurred, this, &AppController::failProcess);
+    connect(&m_conversionProcess, &Md2Any::ConversionProcess::finished, this, &AppController::finishProcess);
 }
 
 AppController::AppController(const QString &settingsPath, QObject *parent)
@@ -42,8 +74,7 @@ AppController::AppController(const QString &settingsPath, QObject *parent)
     , m_settingsStore(settingsPath)
 {
     initializeFromSettings();
-    connect(&m_process, &QProcess::finished, this, &AppController::finishProcess);
-    connect(&m_process, &QProcess::errorOccurred, this, &AppController::failProcess);
+    connect(&m_conversionProcess, &Md2Any::ConversionProcess::finished, this, &AppController::finishProcess);
 }
 
 QString AppController::statusMessage() const
@@ -51,9 +82,34 @@ QString AppController::statusMessage() const
     return m_statusMessage;
 }
 
+QString AppController::formatStatusMessage() const
+{
+    return m_formatStatusMessage;
+}
+
 QString AppController::logText() const
 {
     return m_logText;
+}
+
+QString AppController::pandocPath() const
+{
+    return m_runner.pandocPath();
+}
+
+QStringList AppController::outputFormats() const
+{
+    return m_outputFormats;
+}
+
+QStringList AppController::inputFormats() const
+{
+    return m_inputFormats;
+}
+
+QString AppController::defaultInputFormat() const
+{
+    return m_defaultInputFormat;
 }
 
 QString AppController::defaultOutputFormat() const
@@ -71,6 +127,11 @@ QString AppController::lastOutputDir() const
     return m_lastOutputDir;
 }
 
+bool AppController::hasOutputFile() const
+{
+    return !m_lastOutputPath.isEmpty() && QFileInfo::exists(m_lastOutputPath);
+}
+
 bool AppController::valid() const
 {
     return m_valid;
@@ -81,9 +142,25 @@ bool AppController::busy() const
     return m_busy;
 }
 
+void AppController::setPandocPath(const QString &pandocPath)
+{
+    const auto normalizedPath = pandocPath.trimmed().isEmpty()
+        ? QString::fromLatin1(Md2Any::DefaultPandocPath)
+        : pandocPath.trimmed();
+
+    if (m_runner.pandocPath() == normalizedPath) {
+        return;
+    }
+
+    m_runner = Md2Any::PandocRunner(normalizedPath, m_inputFormats, m_outputFormats);
+    refreshFormats();
+    emit pandocPathChanged();
+}
+
 void AppController::validateConversion(
     const QString &inputPath,
     const QString &outputPath,
+    const QString &inputFormat,
     const QString &outputFormat,
     bool overwrite)
 {
@@ -91,7 +168,7 @@ void AppController::validateConversion(
         return;
     }
 
-    const auto task = makeTask(inputPath, outputPath, outputFormat, overwrite);
+    const auto task = makeTask(inputPath, outputPath, inputFormat, outputFormat, overwrite);
     const auto validation = m_runner.validate(task);
     const auto pandocStatus = m_runner.checkPandocAvailable();
     setValid(validation.success && pandocStatus.success);
@@ -124,6 +201,7 @@ void AppController::validateConversion(
 void AppController::startConversion(
     const QString &inputPath,
     const QString &outputPath,
+    const QString &inputFormat,
     const QString &outputFormat,
     bool overwrite)
 {
@@ -131,7 +209,7 @@ void AppController::startConversion(
         return;
     }
 
-    const auto task = makeTask(inputPath, outputPath, outputFormat, overwrite);
+    const auto task = makeTask(inputPath, outputPath, inputFormat, outputFormat, overwrite);
     const auto validation = m_runner.validate(task);
     const auto pandocStatus = m_runner.checkPandocAvailable();
 
@@ -159,9 +237,7 @@ void AppController::startConversion(
     setStatusMessage(QStringLiteral("正在转换..."));
     setLogText(QStringLiteral("正在调用 Pandoc，请稍候...\n\n命令：\n%1").arg(commandPreview(QStringList({program}) + arguments)));
 
-    m_process.setProgram(program);
-    m_process.setArguments(arguments);
-    m_process.start();
+    m_conversionProcess.start(program, arguments);
 }
 
 void AppController::cancelConversion()
@@ -174,7 +250,73 @@ void AppController::cancelConversion()
     setStatusMessage(QStringLiteral("正在取消..."));
     appendLogLine(QStringLiteral(""));
     appendLogLine(QStringLiteral("正在取消转换。"));
-    m_process.kill();
+    m_conversionProcess.cancel();
+}
+
+void AppController::checkPandocPath(const QString &pandocPath)
+{
+    if (m_busy) {
+        return;
+    }
+
+    const Md2Any::PandocRunner runner(pandocPath);
+    const auto pandocStatus = runner.checkPandocAvailable();
+
+    if (pandocStatus.success) {
+        setStatusMessage(QStringLiteral("Pandoc 检测通过。"));
+        const Md2Any::PandocFormatService formatService(runner.pandocPath());
+        const auto formats = formatService.discover();
+        setLogText(QStringLiteral("Pandoc：已找到\n路径：%1\n可写格式：%2 个")
+            .arg(pandocStatus.command.join(QStringLiteral(" ")))
+            .arg(formats.outputFormats.size()));
+        return;
+    }
+
+    setValid(false);
+    setStatusMessage(QStringLiteral("未找到 Pandoc。"));
+    setLogText(QStringLiteral("Pandoc：%1").arg(pandocStatus.message));
+}
+
+void AppController::savePandocPath(const QString &pandocPath)
+{
+    if (m_busy) {
+        return;
+    }
+
+    setPandocPath(pandocPath);
+    m_settingsStore.save({
+        m_runner.pandocPath(),
+        m_lastInputDir,
+        m_lastOutputDir,
+        m_defaultInputFormat,
+        m_defaultOutputFormat,
+    });
+
+    setStatusMessage(QStringLiteral("Pandoc 路径设置已保存。"));
+    setLogText(QStringLiteral("已保存 Pandoc 路径：%1").arg(m_runner.pandocPath()));
+}
+
+void AppController::openOutputFile()
+{
+    if (m_lastOutputPath.isEmpty()) {
+        setStatusMessage(QStringLiteral("还没有可打开的输出文件。"));
+        return;
+    }
+
+    const QFileInfo outputInfo(m_lastOutputPath);
+    if (!outputInfo.exists() || !outputInfo.isFile()) {
+        setStatusMessage(QStringLiteral("输出文件不存在。"));
+        appendLogLine(QStringLiteral(""));
+        appendLogLine(QStringLiteral("输出文件不存在：%1").arg(outputInfo.absoluteFilePath()));
+        emit hasOutputFileChanged();
+        return;
+    }
+
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(outputInfo.absoluteFilePath()))) {
+        setStatusMessage(QStringLiteral("无法打开输出文件。"));
+        appendLogLine(QStringLiteral(""));
+        appendLogLine(QStringLiteral("无法打开输出文件：%1").arg(outputInfo.absoluteFilePath()));
+    }
 }
 
 void AppController::openOutputDirectory()
@@ -202,25 +344,27 @@ QString AppController::normalizedOutputPath(const QString &outputPath, const QSt
     }
 
     const auto format = normalizeFormat(outputFormat);
+    const auto extension = Md2Any::recommendedExtensionForFormat(format);
     QFileInfo info(trimmedPath);
     const auto suffix = info.suffix().toLower();
 
-    if (suffix == format) {
+    if (suffix == extension) {
         return trimmedPath;
     }
 
     if (suffix.isEmpty()) {
-        return trimmedPath + QStringLiteral(".") + format;
+        return trimmedPath + QStringLiteral(".") + extension;
     }
 
     const auto dir = info.dir().path();
     const auto completeBaseName = info.completeBaseName();
-    return QDir(dir).filePath(completeBaseName + QStringLiteral(".") + format);
+    return QDir(dir).filePath(completeBaseName + QStringLiteral(".") + extension);
 }
 
 Md2Any::ConversionTask AppController::makeTask(
     const QString &inputPath,
     const QString &outputPath,
+    const QString &inputFormat,
     const QString &outputFormat,
     bool overwrite) const
 {
@@ -230,6 +374,7 @@ Md2Any::ConversionTask AppController::makeTask(
         normalizeFormat(outputFormat),
         overwrite,
         {},
+        normalizeInputFormat(inputFormat),
     };
 }
 
@@ -254,16 +399,22 @@ void AppController::saveRecentSettings(const Md2Any::ConversionTask &task)
     const auto inputDir = inputInfo.absolutePath();
     const auto outputDir = outputInfo.absolutePath();
     const auto format = normalizeFormat(task.outputFormat);
+    const auto inputFormat = normalizeInputFormat(task.inputFormat);
 
     m_settingsStore.save({
         m_runner.pandocPath(),
         inputDir,
         outputDir,
+        inputFormat,
         format,
     });
 
     setLastInputDir(inputDir);
     setLastOutputDir(outputDir);
+    if (m_defaultInputFormat != inputFormat) {
+        m_defaultInputFormat = inputFormat;
+        emit defaultInputFormatChanged();
+    }
     setDefaultOutputFormat(format);
 }
 
@@ -271,17 +422,57 @@ void AppController::initializeFromSettings()
 {
     const auto settings = m_settingsStore.load();
     m_runner = Md2Any::PandocRunner(settings.pandocPath);
+    m_defaultInputFormat = settings.lastInputFormat;
     m_defaultOutputFormat = settings.lastOutputFormat;
     m_lastInputDir = settings.lastInputDir;
     m_lastOutputDir = settings.lastOutputDir;
     m_statusMessage = QStringLiteral("请选择文件并检查转换配置。");
+    refreshFormats();
 }
 
-void AppController::finishProcess(int exitCode, QProcess::ExitStatus exitStatus)
+void AppController::refreshFormats()
 {
-    const auto stdoutText = QString::fromLocal8Bit(m_process.readAllStandardOutput()).trimmed();
-    const auto stderrText = QString::fromLocal8Bit(m_process.readAllStandardError()).trimmed();
-    const auto success = exitStatus == QProcess::NormalExit && exitCode == 0 && !m_cancelRequested;
+    const Md2Any::PandocFormatService formatService(m_runner.pandocPath());
+    const auto discovered = formatService.discover();
+    const auto discoveredInputFormats = discovered.inputFormats.isEmpty()
+        ? Md2Any::PandocFormatService::fallbackInputFormats()
+        : discovered.inputFormats;
+    const auto discoveredOutputFormats = discovered.outputFormats.isEmpty()
+        ? Md2Any::PandocFormatService::fallbackOutputFormats()
+        : discovered.outputFormats;
+    const auto inputFormats = Md2Any::sortFormatsByPriority(discoveredInputFormats, inputFormatPriority());
+    const auto outputFormats = Md2Any::sortFormatsByPriority(discoveredOutputFormats, outputFormatPriority());
+
+    m_runner = Md2Any::PandocRunner(m_runner.pandocPath(), inputFormats, outputFormats);
+    setFormatStatusMessage(discovered.success
+        ? QStringLiteral("格式列表来自当前 Pandoc。")
+        : QStringLiteral("未能读取 Pandoc 格式列表，正在使用保底格式。"));
+
+    if (m_inputFormats != inputFormats) {
+        m_inputFormats = inputFormats;
+        emit inputFormatsChanged();
+    }
+
+    if (m_outputFormats != outputFormats) {
+        m_outputFormats = outputFormats;
+        emit outputFormatsChanged();
+    }
+
+    if (!m_inputFormats.contains(m_defaultInputFormat) && !m_inputFormats.isEmpty()) {
+        m_defaultInputFormat = m_inputFormats.first();
+        emit defaultInputFormatChanged();
+    }
+
+    if (!m_outputFormats.contains(m_defaultOutputFormat) && !m_outputFormats.isEmpty()) {
+        setDefaultOutputFormat(m_outputFormats.first());
+    }
+}
+
+void AppController::finishProcess(const Md2Any::ConversionProcessResult &result)
+{
+    const auto stdoutText = result.standardOutput;
+    const auto stderrText = result.standardError;
+    const auto success = result.exitStatus == QProcess::NormalExit && result.exitCode == 0 && !result.canceled;
 
     if (!stdoutText.isEmpty()) {
         appendLogLine(QStringLiteral(""));
@@ -295,14 +486,14 @@ void AppController::finishProcess(int exitCode, QProcess::ExitStatus exitStatus)
         appendLogLine(stderrText);
     }
 
-    if (m_cancelRequested) {
+    if (result.canceled) {
         setValid(false);
         setStatusMessage(QStringLiteral("转换已取消。"));
         appendLogLine(QStringLiteral(""));
         appendLogLine(QStringLiteral("转换已取消。"));
     } else if (success) {
         saveRecentSettings(m_runningTask);
-        m_lastOutputPath = QFileInfo(m_runningTask.outputPath).absoluteFilePath();
+        setLastOutputPath(QFileInfo(m_runningTask.outputPath).absoluteFilePath());
         setValid(true);
         setStatusMessage(QStringLiteral("转换成功。"));
         appendLogLine(QStringLiteral(""));
@@ -311,23 +502,14 @@ void AppController::finishProcess(int exitCode, QProcess::ExitStatus exitStatus)
         setValid(false);
         setStatusMessage(QStringLiteral("转换失败。"));
         appendLogLine(QStringLiteral(""));
-        appendLogLine(QStringLiteral("Pandoc 退出码：%1").arg(exitCode));
+        if (!result.errorString.isEmpty()) {
+            appendLogLine(QStringLiteral("进程错误：%1").arg(result.errorString));
+        }
+        appendLogLine(QStringLiteral("Pandoc 退出码：%1").arg(result.exitCode));
+        appendLogLine(QStringLiteral("提示：当前输入/输出格式组合可能不受 Pandoc 支持，请查看上方错误输出。"));
     }
 
     setBusy(false);
-}
-
-void AppController::failProcess(QProcess::ProcessError error)
-{
-    if (error == QProcess::Crashed && m_cancelRequested) {
-        return;
-    }
-
-    setValid(false);
-    setBusy(false);
-    setStatusMessage(QStringLiteral("转换失败。"));
-    appendLogLine(QStringLiteral(""));
-    appendLogLine(QStringLiteral("进程错误：%1").arg(m_process.errorString()));
 }
 
 void AppController::setStatusMessage(const QString &statusMessage)
@@ -338,6 +520,16 @@ void AppController::setStatusMessage(const QString &statusMessage)
 
     m_statusMessage = statusMessage;
     emit statusMessageChanged();
+}
+
+void AppController::setFormatStatusMessage(const QString &formatStatusMessage)
+{
+    if (m_formatStatusMessage == formatStatusMessage) {
+        return;
+    }
+
+    m_formatStatusMessage = formatStatusMessage;
+    emit formatStatusMessageChanged();
 }
 
 void AppController::setLogText(const QString &logText)
@@ -378,6 +570,17 @@ void AppController::setLastOutputDir(const QString &lastOutputDir)
 
     m_lastOutputDir = lastOutputDir;
     emit lastOutputDirChanged();
+}
+
+void AppController::setLastOutputPath(const QString &lastOutputPath)
+{
+    const auto normalizedPath = lastOutputPath.trimmed();
+    if (m_lastOutputPath == normalizedPath) {
+        return;
+    }
+
+    m_lastOutputPath = normalizedPath;
+    emit hasOutputFileChanged();
 }
 
 void AppController::setValid(bool valid)

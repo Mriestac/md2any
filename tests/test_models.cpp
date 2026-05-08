@@ -14,6 +14,7 @@ private slots:
     {
         const ConversionTask task;
 
+        QCOMPARE(task.inputFormat, QStringLiteral("markdown"));
         QCOMPARE(task.outputFormat, QStringLiteral("html"));
         QCOMPARE(task.overwrite, false);
         QVERIFY(task.inputPath.isEmpty());
@@ -31,6 +32,17 @@ private slots:
         QVERIFY(isSupportedOutputFormat(QStringLiteral(" pdf ")));
         QVERIFY(!isSupportedOutputFormat(QStringLiteral("epub")));
         QVERIFY(!isSupportedOutputFormat(QString()));
+    }
+
+    void supportedInputFormatsAreCentralized()
+    {
+        const auto formats = supportedInputFormats();
+
+        QCOMPARE(formats, QStringList({QStringLiteral("markdown")}));
+        QVERIFY(isSupportedInputFormat(QStringLiteral("markdown")));
+        QVERIFY(isSupportedInputFormat(QStringLiteral(" MARKDOWN ")));
+        QVERIFY(!isSupportedInputFormat(QStringLiteral("docx")));
+        QVERIFY(!isSupportedInputFormat(QString()));
     }
 
     void conversionResultHasFailureDefaults()

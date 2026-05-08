@@ -12,6 +12,16 @@ int main(int argc, char *argv[])
         return 7;
     }
 
+    if (args.contains(QStringLiteral("--list-input-formats"))) {
+        QTextStream(stdout) << "markdown\nhtml\ndocx\n";
+        return 0;
+    }
+
+    if (args.contains(QStringLiteral("--list-output-formats"))) {
+        QTextStream(stdout) << "html\ndocx\npdf\nepub\n";
+        return 0;
+    }
+
     const auto outputIndex = args.indexOf(QStringLiteral("-o"));
     if (outputIndex < 0 || outputIndex + 1 >= args.size()) {
         QTextStream(stderr) << "missing output path\n";

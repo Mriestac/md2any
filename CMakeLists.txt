@@ -24,6 +24,8 @@ qt_policy(SET QTP0001 NEW)
 qt_policy(SET QTP0004 NEW)
 
 add_library(md2any_core STATIC
+    src/conversion_process.cpp
+    src/pandoc_formats.cpp
     src/pandoc_runner.cpp
     src/settings_store.cpp
 )
@@ -33,8 +35,10 @@ target_sources(md2any_core
         FILE_SET HEADERS
         BASE_DIRS src
         FILES
+            src/conversion_process.h
             src/conversion_result.h
             src/conversion_task.h
+            src/pandoc_formats.h
             src/pandoc_runner.h
             src/settings_store.h
 )

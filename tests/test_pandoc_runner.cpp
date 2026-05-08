@@ -17,6 +17,7 @@ private slots:
         const PandocRunner runner;
 
         QCOMPARE(runner.pandocPath(), QStringLiteral("pandoc"));
+        QCOMPARE(runner.inputFormats(), QStringList({QStringLiteral("markdown")}));
     }
 
     void detectsExistingCustomPandocPath()
@@ -116,6 +117,26 @@ private slots:
         QCOMPARE(result.message, QStringLiteral("Unsupported output format."));
     }
 
+    void rejectsUnsupportedInputFormat()
+    {
+        QTemporaryDir tempDir;
+        QVERIFY(tempDir.isValid());
+        const auto inputPath = writeMarkdownFile(tempDir, QStringLiteral("input.md"));
+
+        const PandocRunner runner;
+        const auto result = runner.validate({
+            inputPath,
+            tempDir.filePath(QStringLiteral("output.html")),
+            QStringLiteral("html"),
+            false,
+            {},
+            QStringLiteral("docx"),
+        });
+
+        QVERIFY(!result.success);
+        QCOMPARE(result.message, QStringLiteral("Unsupported input format."));
+    }
+
     void rejectsMissingOutputDirectory()
     {
         QTemporaryDir tempDir;
@@ -176,6 +197,8 @@ private slots:
             QStringLiteral("pandoc"),
             QStringLiteral("--standalone"),
             QStringLiteral("--mathjax"),
+            QStringLiteral("-f"),
+            QStringLiteral("markdown"),
             QStringLiteral("-t"),
             QStringLiteral("html"),
             inputPath,
@@ -202,6 +225,8 @@ private slots:
 
         QCOMPARE(command, QStringList({
             QStringLiteral("C:/Pandoc/pandoc.exe"),
+            QStringLiteral("-f"),
+            QStringLiteral("markdown"),
             QStringLiteral("-t"),
             QStringLiteral("docx"),
             inputPath,
@@ -231,6 +256,8 @@ private slots:
             QStringLiteral("--standalone"),
             QStringLiteral("--toc"),
             QStringLiteral("--mathjax"),
+            QStringLiteral("-f"),
+            QStringLiteral("markdown"),
             QStringLiteral("-t"),
             QStringLiteral("html"),
             inputPath,
